@@ -232,7 +232,9 @@ def drifted_label(label, step, drift_every):
     # This is the cyclic class rotation used in the paper's drift experiment.
     if drift_every <= 0:
         return int(label)
+
     shifts = step // drift_every
+
     return int((label + shifts) % 7)
 
 def run(args):
@@ -268,8 +270,18 @@ def run(args):
     output.parent.mkdir(parents=True, exist_ok=True)
 
     columns = [
-        "step", "reward", "rolling_reward", "cumulative_reward",
-        "cumulative_regret", "selected_action", "true_action", "greedy_action"
+        "step",
+        "reward",
+        "rolling_reward",
+        "cumulative_reward",
+        "cumulative_regret",
+        "selected_action",
+        "true_action",
+        "greedy_action",
+        "drift_event",
+        "drift_number",
+        "steps_since_drift",
+        "elapsed_seconds"
     ]
 
     with output.open("w", newline="", encoding="utf-8") as csv_file:
@@ -280,9 +292,37 @@ def run(args):
             # The dataset is treated as a stream and replayed from the start
             # when we reach its final row. This lets experiments run for more
             # iterations than there are distinct observations.
+            
+            # Convert zero-based step into human-readable iteration
+            iteration = step + 1
             i = step % n_rows
             context = X[i]
-            true_action = drifted_label(y[i], step, args.drift_every)
+            
+            # Apply concept drift
+            true_action = drifted_label(
+                y[i],
+                iteration,
+                args.drift_every
+            )
+
+            # Track concept drift information
+            if args.drift_every > 0:
+        
+                drift_event = (
+                    iteration % args.drift_every == 0
+                )
+        
+                drift_number = iteration // args.drift_every
+        
+                if iteration < args.drift_every:
+                    steps_since_drift = None
+                else:
+                    steps_since_drift = iteration % args.drift_every
+        
+            else:
+                drift_event = False
+                drift_number = 0
+                steps_since_drift = None
 
             # For every possible action, use that action's EXP3 selector to
             # sample a neural-network configuration. NeuralBandit3 therefore
@@ -341,8 +381,12 @@ def run(args):
             if len(reward_history) > args.rolling_window:
                 reward_history.pop(0)
 
-            if ((step + 1) % args.log_every == 0
-                    or step == 0 or step + 1 == args.steps):
+            if (
+                iteration % args.log_every == 0
+                or iteration == 1
+                or iteration == args.steps
+                or drift_event
+            ):
                 rolling = float(np.mean(reward_history))
                 elapsed = time.time() - start_time
                 print(
@@ -353,7 +397,7 @@ def run(args):
                     f"elapsed={elapsed:.1f}s"
                 )
                 writer.writerow({
-                    "step": step + 1,
+                    "step": iteration,
                     "reward": reward,
                     "rolling_reward": rolling,
                     "cumulative_reward": cumulative_reward,
@@ -361,6 +405,10 @@ def run(args):
                     "selected_action": action,
                     "true_action": true_action,
                     "greedy_action": greedy_action,
+                    "drift_event": drift_event,
+                    "drift_number": drift_number,
+                    "steps_since_drift": steps_since_drift,
+                    "elapsed_seconds": elapsed
                 })
                 csv_file.flush()
 
