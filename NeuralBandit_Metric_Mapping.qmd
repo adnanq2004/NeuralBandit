@@ -1,0 +1,101 @@
+---
+title: "NeuralBandit_Metric_Mapping"
+format: pdf
+execute:
+  echo: false
+  warning: false
+  message: false
+  fig-width: 9
+  fig-height: 5
+---
+
+```         
+{r}
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+```
+
+```{r}
+
+metrics1 <- read.csv("neuralbandit3_original_metrics_plain.csv")
+
+metrics2 <- read.csv("neuralbandit3_original_metrics_conceptdrift.csv")
+
+metrics3 <- read_csv("neuralbandit3_original_metrics.csv")
+
+ggplot(metrics1, aes(x = step, y = rolling_reward)) +
+  geom_line(linewidth = 1) +
+  labs(
+    title = "NeuralBandit3: Rolling Reward Normal",
+    x = "Training Steps",
+    y = "Rolling Reward"
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    labels = scales::percent
+  ) +
+  theme_minimal()
+
+metrics2$drift_event <- as.logical(metrics2$drift_event)
+
+drift_points <- metrics2 %>%
+  filter(drift_event == TRUE) %>%
+  pull(step)
+
+ggplot(metrics2, aes(x = step, y = rolling_reward)) +
+  geom_line(linewidth = 1) +
+  geom_vline(
+    xintercept = drift_points,
+    linetype = "dashed",
+    color = "red"
+  ) +
+  labs(
+    title = "NeuralBandit3: Rolling Reward w/ Concept Drift",
+    x = "Training Steps",
+    y = "Rolling Reward"
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    labels = scales::percent
+  ) +
+  theme_minimal()
+
+metrics3$drift_event <- as.logical(metrics3$drift_event)
+
+drift_points <- metrics3 %>%
+  filter(drift_event == TRUE) %>%
+  pull(step)
+
+ggplot(metrics3, aes(x = step, y = rolling_reward)) +
+  geom_line(linewidth = 1) +
+  geom_vline(
+    xintercept = drift_points,
+    linetype = "dashed",
+    color = "red"
+  ) +
+  labs(
+    title = "NeuralBandit3: Rolling Reward w/ Concept Drift",
+    x = "Training Steps",
+    y = "Rolling Reward"
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    labels = scales::percent
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Check the column names
+names(metrics2)
+
+# Check the values stored in drift_event
+table(metrics2$drift_event, useNA = "ifany")
+
+# Check how many drift points were found
+length(drift_points)
+
+# Display the actual drift points
+drift_points
+```
