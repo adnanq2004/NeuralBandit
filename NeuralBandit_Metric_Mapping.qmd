@@ -20,10 +20,6 @@ library(ggplot2)
 
 metrics1 <- read.csv("neuralbandit3_original_metrics_plain.csv")
 
-metrics2 <- read.csv("neuralbandit3_original_metrics_conceptdrift.csv")
-
-metrics3 <- read_csv("neuralbandit3_original_metrics.csv")
-
 ggplot(metrics1, aes(x = step, y = rolling_reward)) +
   geom_line(linewidth = 1) +
   labs(
@@ -37,21 +33,62 @@ ggplot(metrics1, aes(x = step, y = rolling_reward)) +
   ) +
   theme_minimal()
 
+metrics2 <- read.csv("neuralbandit3_original_metrics_conceptdrift.csv")
+
+metrics2 <- metrics2 %>%
+  arrange(step) %>%
+  mutate(
+    reward_change = rolling_reward - lag(rolling_reward),
+    increasing = reward_change > 0,
+    recovery_signal = increasing &
+      lag(increasing, 1, default = FALSE) &
+      lag(increasing, 2, default = FALSE)
+  )
+
 metrics2$drift_event <- as.logical(metrics2$drift_event)
 
 drift_points <- metrics2 %>%
-  filter(drift_event == TRUE) %>%
+  filter(drift_event) %>%
   pull(step)
+
+recovery_points2 <- data.frame()
+
+for (d in drift_points) {
+  recovery <- metrics2 %>%
+    filter(step > d, recovery_signal == TRUE) %>%
+    slice(1)
+  
+  if (nrow(recovery) > 0) {
+    recovery_points2 <- bind_rows(
+      recovery_points2,
+      data.frame(
+        drift_step = d,
+        recovery_step = recovery$step,
+        rolling_reward = recovery$rolling_reward
+      )
+    )
+  }
+}
 
 ggplot(metrics2, aes(x = step, y = rolling_reward)) +
   geom_line(linewidth = 1) +
+  # Concept drift
   geom_vline(
     xintercept = drift_points,
     linetype = "dashed",
-    color = "red"
+    color = "red",
+    linewidth = 0.8
+  ) +
+  # Recovery begins
+  geom_vline(
+    xintercept = recovery_points2$recovery_step,
+    linetype = "dotted",
+    color = "blue",
+    linewidth = 0.8
   ) +
   labs(
-    title = "NeuralBandit3: Rolling Reward w/ Concept Drift",
+    title = "NeuralBandit3: Rolling Reward Concept Drift and Recovery",
+    subtitle = "Red = concept drift | Blue = detected recovery",
     x = "Training Steps",
     y = "Rolling Reward"
   ) +
@@ -60,22 +97,63 @@ ggplot(metrics2, aes(x = step, y = rolling_reward)) +
     labels = scales::percent
   ) +
   theme_minimal()
+
+metrics3 <- read.csv("neuralbandit3_original_metrics_conceptdrift_more.csv")
+
+metrics3 <- metrics3 %>%
+  arrange(step) %>%
+  mutate(
+    reward_change = rolling_reward - lag(rolling_reward),
+    increasing = reward_change > 0,
+    recovery_signal = increasing &
+      lag(increasing, 1, default = FALSE) &
+      lag(increasing, 2, default = FALSE)
+  )
 
 metrics3$drift_event <- as.logical(metrics3$drift_event)
 
 drift_points <- metrics3 %>%
-  filter(drift_event == TRUE) %>%
+  filter(drift_event) %>%
   pull(step)
+
+recovery_points3 <- data.frame()
+
+for (d in drift_points) {
+  recovery <- metrics3 %>%
+    filter(step > d, recovery_signal == TRUE) %>%
+    slice(1)
+  
+  if (nrow(recovery) > 0) {
+    recovery_points3 <- bind_rows(
+      recovery_points,
+      data.frame(
+        drift_step = d,
+        recovery_step = recovery$step,
+        rolling_reward = recovery$rolling_reward
+      )
+    )
+  }
+}
 
 ggplot(metrics3, aes(x = step, y = rolling_reward)) +
   geom_line(linewidth = 1) +
+  # Concept drift
   geom_vline(
     xintercept = drift_points,
     linetype = "dashed",
-    color = "red"
+    color = "red",
+    linewidth = 0.8
+  ) +
+  # Recovery begins
+  geom_vline(
+    xintercept = recovery_points3$recovery_step,
+    linetype = "dotted",
+    color = "blue",
+    linewidth = 0.8
   ) +
   labs(
-    title = "NeuralBandit3: Rolling Reward w/ Concept Drift",
+    title = "NeuralBandit3: Rolling Reward More Concept Drift",
+    subtitle = "Red = concept drift | Blue = detected recovery",
     x = "Training Steps",
     y = "Rolling Reward"
   ) +
@@ -84,18 +162,4 @@ ggplot(metrics3, aes(x = step, y = rolling_reward)) +
     labels = scales::percent
   ) +
   theme_minimal()
-```
-
-```{r}
-# Check the column names
-names(metrics2)
-
-# Check the values stored in drift_event
-table(metrics2$drift_event, useNA = "ifany")
-
-# Check how many drift points were found
-length(drift_points)
-
-# Display the actual drift points
-drift_points
 ```
