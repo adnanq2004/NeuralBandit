@@ -47,15 +47,34 @@ metrics2 <- metrics2 %>%
 
 metrics2$drift_event <- as.logical(metrics2$drift_event)
 
-drift_points <- metrics2 %>%
+drift_points2 <- metrics2 %>%
   filter(drift_event) %>%
   pull(step)
 
+# Make sure drift points are sorted
+drift_points2 <- sort(drift_points2)
+
+# Start with an empty data frame
 recovery_points2 <- data.frame()
 
-for (d in drift_points) {
+for (i in seq_along(drift_points2)) {
+  
+  d <- drift_points2[i]
+  
+  # Stop searching at the next drift
+  if (i < length(drift_points2)) {
+    next_drift <- drift_points2[i + 1]
+  } else {
+    next_drift <- Inf
+  }
+  
   recovery <- metrics2 %>%
-    filter(step > d, recovery_signal == TRUE) %>%
+    filter(
+      step > d,
+      step < next_drift,
+      drift_event == FALSE,
+      recovery_signal == TRUE
+    ) %>%
     slice(1)
   
   if (nrow(recovery) > 0) {
@@ -70,11 +89,18 @@ for (d in drift_points) {
   }
 }
 
+recovery_points2 <- recovery_points2 %>%
+  mutate(
+    recovery_time = recovery_step - drift_step
+  )
+
+recovery_points2
+
 ggplot(metrics2, aes(x = step, y = rolling_reward)) +
   geom_line(linewidth = 1) +
   # Concept drift
   geom_vline(
-    xintercept = drift_points,
+    xintercept = drift_points2,
     linetype = "dashed",
     color = "red",
     linewidth = 0.8
@@ -112,20 +138,39 @@ metrics3 <- metrics3 %>%
 
 metrics3$drift_event <- as.logical(metrics3$drift_event)
 
-drift_points <- metrics3 %>%
+drift_points3 <- metrics3 %>%
   filter(drift_event) %>%
   pull(step)
 
+# Make sure drift points are sorted
+drift_points3 <- sort(drift_points3)
+
+# Start with an empty data frame
 recovery_points3 <- data.frame()
 
-for (d in drift_points) {
+for (i in seq_along(drift_points3)) {
+  
+  d <- drift_points3[i]
+  
+  # Stop searching at the next drift
+  if (i < length(drift_points3)) {
+    next_drift <- drift_points3[i + 1]
+  } else {
+    next_drift <- Inf
+  }
+  
   recovery <- metrics3 %>%
-    filter(step > d, recovery_signal == TRUE) %>%
+    filter(
+      step > d,
+      step < next_drift,
+      drift_event == FALSE,
+      recovery_signal == TRUE
+    ) %>%
     slice(1)
   
   if (nrow(recovery) > 0) {
     recovery_points3 <- bind_rows(
-      recovery_points,
+      recovery_points3,
       data.frame(
         drift_step = d,
         recovery_step = recovery$step,
@@ -135,11 +180,16 @@ for (d in drift_points) {
   }
 }
 
+recovery_points3 <- recovery_points3 %>%
+  mutate(recovery_time = recovery_step - drift_step)
+
+recovery_points3
+
 ggplot(metrics3, aes(x = step, y = rolling_reward)) +
   geom_line(linewidth = 1) +
   # Concept drift
   geom_vline(
-    xintercept = drift_points,
+    xintercept = drift_points3,
     linetype = "dashed",
     color = "red",
     linewidth = 0.8
