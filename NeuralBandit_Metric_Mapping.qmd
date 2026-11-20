@@ -17,14 +17,14 @@ library(ggplot2)
 
 ```{r}
 
-extension_names <- c("conceptdrift", "conceptdrift_more")
+activation_names <- c("sigmoid", "sigmoid_more")
 
-for (extension in extension_names) {
+for (activation in activation_names) {
   
   # Read the corresponding CSV
   path <- paste0(
     "neuralbandit3_original_metrics_",
-    extension,
+    activation,
     ".csv"
   )
   
@@ -88,7 +88,7 @@ for (extension in extension_names) {
       recovery_time = recovery_step - drift_step
     )
   
-  print(paste("Type:", extension))
+  print(paste("Activation:", activation))
   print(recovery_points)
   
   # Create graph
@@ -112,7 +112,7 @@ for (extension in extension_names) {
     labs(
       title = paste0(
         "NeuralBandit3: Rolling Reward - ",
-        extension
+        activation
       ),
       subtitle = "Red = concept drift | Blue = detected recovery",
       x = "Training Steps",

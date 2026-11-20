@@ -24,14 +24,14 @@ Longer run (Original):
 
 Concept-drift test (Original):
 
-&#x09;python neuralbandit3_original.py --steps 20000 --drift-every 5000 --log-every 500 --output neuralbandit3_original_metrics_conceptdrift.csv
+&#x09;python neuralbandit3_original.py --steps 20000 --drift-every 5000 --log-every 500 --output neuralbandit3_original_metrics_sigmoid.csv
 
 
-&#x09;python neuralbandit3_original.py --steps 50000 --drift-every 5000 --log-every 500 --output neuralbandit3_original_metrics_conceptdrift_more.csv
+&#x09;python neuralbandit3_original.py --steps 50000 --drift-every 5000 --log-every 500 --output neuralbandit3_original_metrics_sigmoid_more.csv
 
 
 
-Concept-drift test (Activations):
+Concept-drift test (Activation Changes):
 
 &#x09;python neuralbandit3_improvingactivation.py --steps 20000 --drift-every 5000 --log-every 500 --activation relu --output neuralbandit3_improvingactivation_metrics_relu.csv
 
@@ -49,3 +49,13 @@ Concept-drift test (Activations):
 
 
 &#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation leaky_relu --output neuralbandit3_improvingactivation_metrics_leaky_relu_more.csv
+
+
+
+Exploration-rate test (Gamma, Gamma_model)
+
+&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.01 --gamma-model 0.1 --output neuralbandit3_improvingexploration_metrics1_.csv
+
+&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.05 --gamma-model 0.1 --output neuralbandit3_improvingexploration_metrics2_.csv
+
+&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.10 --gamma-model 0.1 --output neuralbandit3_improvingexploration_metrics3_.csv
