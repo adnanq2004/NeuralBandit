@@ -242,3 +242,346 @@ for (activation in activation_names) {
   print(gg_graph)
 }
 ```
+
+```{r}
+
+expl_algorithms_names <- c("005", "01", "05", "10")
+
+for (expl_algorithms in expl_algorithms_names) {
+  
+  # Read the corresponding CSV
+  path <- paste0(
+    "neuralbandit3_improvingexploration_metrics_",
+    expl_algorithms,
+    ".csv"
+  )
+  
+  metrics <- read_csv(path, show_col_types = FALSE)
+  
+  # Calculate recovery signals
+  metrics <- metrics %>%
+    arrange(step) %>%
+    mutate(
+      drift_event = as.logical(drift_event),
+      reward_change = rolling_reward - lag(rolling_reward),
+      increasing = reward_change > 0,
+      recovery_signal = increasing &
+        lag(increasing, 1, default = FALSE) &
+        lag(increasing, 2, default = FALSE)
+    )
+  
+  # Identify concept drift points
+  drift_points <- metrics %>%
+    filter(drift_event == TRUE) %>%
+    pull(step) %>%
+    sort()
+  
+  # Initialize recovery results
+  recovery_points <- data.frame()
+  
+  # Identify recovery after each drift
+  for (j in seq_along(drift_points)) {
+    d <- drift_points[j]
+    # Stop searching at the next drift
+    if (j < length(drift_points)) {
+      next_drift <- drift_points[j + 1]
+    } else {
+      next_drift <- Inf
+    }
+    
+    recovery <- metrics %>%
+      filter(
+        step > d,
+        step < next_drift,
+        drift_event == FALSE,
+        recovery_signal == TRUE
+      ) %>%
+      slice(1)
+    
+    if (nrow(recovery) > 0) {
+      recovery_points <- bind_rows(
+        recovery_points,
+        data.frame(
+          drift_step = d,
+          recovery_step = recovery$step,
+          rolling_reward = recovery$rolling_reward
+        )
+      )
+    }
+  }
+  
+  # Calculate recovery time
+  recovery_points <- recovery_points %>%
+    mutate(
+      recovery_time = recovery_step - drift_step
+    )
+  
+  print(paste("Exploration Algorithm:", expl_algorithms))
+  print(recovery_points)
+  
+  # Create graph
+  gg_graph <- ggplot(metrics, aes(x = step, y = rolling_reward)) +
+    geom_line(linewidth = 1) +
+    # Concept drift
+    geom_vline(
+      xintercept = drift_points,
+      linetype = "dashed",
+      color = "red",
+      linewidth = 0.8
+    ) +
+    # Recovery begins
+    geom_vline(
+      xintercept = recovery_points$recovery_step,
+      linetype = "dotted",
+      color = "blue",
+      linewidth = 0.8
+    ) +
+    
+    labs(
+      title = paste0(
+        "NeuralBandit3: Rolling Reward - Gamma = .",
+        expl_algorithms
+      ),
+      subtitle = "Red = concept drift | Blue = detected recovery",
+      x = "Training Steps",
+      y = "Rolling Reward"
+    ) +
+    
+    scale_y_continuous(
+      limits = c(0, 1),
+      labels = scales::percent
+    ) +
+    theme_minimal()
+  
+  print(gg_graph)
+}
+```
+
+```{r}
+
+expl_method_names <- c("01", "05", "10", "20", "30")
+
+for (expl_method in expl_method_names) {
+  
+  # Read the corresponding CSV
+  path <- paste0(
+    "neuralbandit3_improvingexplorationmodel_metrics_",
+    expl_method,
+    ".csv"
+  )
+  
+  metrics <- read_csv(path, show_col_types = FALSE)
+  
+  # Calculate recovery signals
+  metrics <- metrics %>%
+    arrange(step) %>%
+    mutate(
+      drift_event = as.logical(drift_event),
+      reward_change = rolling_reward - lag(rolling_reward),
+      increasing = reward_change > 0,
+      recovery_signal = increasing &
+        lag(increasing, 1, default = FALSE) &
+        lag(increasing, 2, default = FALSE)
+    )
+  
+  # Identify concept drift points
+  drift_points <- metrics %>%
+    filter(drift_event == TRUE) %>%
+    pull(step) %>%
+    sort()
+  
+  # Initialize recovery results
+  recovery_points <- data.frame()
+  
+  # Identify recovery after each drift
+  for (j in seq_along(drift_points)) {
+    d <- drift_points[j]
+    # Stop searching at the next drift
+    if (j < length(drift_points)) {
+      next_drift <- drift_points[j + 1]
+    } else {
+      next_drift <- Inf
+    }
+    
+    recovery <- metrics %>%
+      filter(
+        step > d,
+        step < next_drift,
+        drift_event == FALSE,
+        recovery_signal == TRUE
+      ) %>%
+      slice(1)
+    
+    if (nrow(recovery) > 0) {
+      recovery_points <- bind_rows(
+        recovery_points,
+        data.frame(
+          drift_step = d,
+          recovery_step = recovery$step,
+          rolling_reward = recovery$rolling_reward
+        )
+      )
+    }
+  }
+  
+  # Calculate recovery time
+  recovery_points <- recovery_points %>%
+    mutate(
+      recovery_time = recovery_step - drift_step
+    )
+  
+  print(paste("Exploration Algorithm:", expl_method))
+  print(recovery_points)
+  
+  # Create graph
+  gg_graph <- ggplot(metrics, aes(x = step, y = rolling_reward)) +
+    geom_line(linewidth = 1) +
+    # Concept drift
+    geom_vline(
+      xintercept = drift_points,
+      linetype = "dashed",
+      color = "red",
+      linewidth = 0.8
+    ) +
+    # Recovery begins
+    geom_vline(
+      xintercept = recovery_points$recovery_step,
+      linetype = "dotted",
+      color = "blue",
+      linewidth = 0.8
+    ) +
+    
+    labs(
+      title = paste0(
+        "NeuralBandit3: Rolling Reward - Gamma_method = .",
+        expl_method
+      ),
+      subtitle = "Red = concept drift | Blue = detected recovery",
+      x = "Training Steps",
+      y = "Rolling Reward"
+    ) +
+    
+    scale_y_continuous(
+      limits = c(0, 1),
+      labels = scales::percent
+    ) +
+    theme_minimal()
+  
+  print(gg_graph)
+}
+```
+
+```{r}
+
+
+activation_names <- c("tanh", "leaky_relu")
+
+for (activation in activation_names) {
+  
+  # Read the corresponding CSV
+  path <- paste0(
+    "neuralbandit3_improvingactivation_metrics_",
+    activation,
+    ".csv"
+  )
+  
+  metrics <- read_csv(path, show_col_types = FALSE)
+  
+  # Calculate recovery signals
+  metrics <- metrics %>%
+    arrange(step) %>%
+    mutate(
+      drift_event = as.logical(drift_event),
+      reward_change = rolling_reward - lag(rolling_reward),
+      increasing = reward_change > 0,
+      recovery_signal = increasing &
+        lag(increasing, 1, default = FALSE) &
+        lag(increasing, 2, default = FALSE)
+    )
+  
+  # Identify concept drift points
+  drift_points <- metrics %>%
+    filter(drift_event == TRUE) %>%
+    pull(step) %>%
+    sort()
+  
+  # Initialize recovery results
+  recovery_points <- data.frame()
+  
+  # Identify recovery after each drift
+  for (j in seq_along(drift_points)) {
+    d <- drift_points[j]
+    # Stop searching at the next drift
+    if (j < length(drift_points)) {
+      next_drift <- drift_points[j + 1]
+    } else {
+      next_drift <- Inf
+    }
+    
+    recovery <- metrics %>%
+      filter(
+        step > d,
+        step < next_drift,
+        drift_event == FALSE,
+        recovery_signal == TRUE
+      ) %>%
+      slice(1)
+    
+    if (nrow(recovery) > 0) {
+      recovery_points <- bind_rows(
+        recovery_points,
+        data.frame(
+          drift_step = d,
+          recovery_step = recovery$step,
+          rolling_reward = recovery$rolling_reward
+        )
+      )
+    }
+  }
+  
+  # Calculate recovery time
+  recovery_points <- recovery_points %>%
+    mutate(
+      recovery_time = recovery_step - drift_step
+    )
+  
+  print(paste("Activation:", activation))
+  print(recovery_points)
+  
+  # Create graph
+  gg_graph <- ggplot(metrics, aes(x = step, y = rolling_reward)) +
+    geom_line(linewidth = 1) +
+    # Concept drift
+    geom_vline(
+      xintercept = drift_points,
+      linetype = "dashed",
+      color = "red",
+      linewidth = 0.8
+    ) +
+    # Recovery begins
+    geom_vline(
+      xintercept = recovery_points$recovery_step,
+      linetype = "dotted",
+      color = "blue",
+      linewidth = 0.8
+    ) +
+    
+    labs(
+      title = paste0(
+        "NeuralBandit3: Rolling Reward - ",
+        activation
+      ),
+      subtitle = "Red = concept drift | Blue = detected recovery",
+      x = "Training Steps",
+      y = "Rolling Reward"
+    ) +
+    
+    scale_y_continuous(
+      limits = c(0, 1),
+      labels = scales::percent
+    ) +
+    theme_minimal()
+  
+  print(gg_graph)
+}
+```

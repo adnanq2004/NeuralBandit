@@ -54,8 +54,29 @@ Concept-drift test (Activation Changes):
 
 Exploration-rate test (Gamma, Gamma_model)
 
-&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.01 --gamma-model 0.1 --output neuralbandit3_improvingexploration_metrics1_.csv
+&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.005 --gamma-model 0.1 --output neuralbandit3_improvingexploration_metrics_005.csv
 
-&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.05 --gamma-model 0.1 --output neuralbandit3_improvingexploration_metrics2_.csv
+&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.01 --gamma-model 0.1 --output neuralbandit3_improvingexploration_metrics_01.csv
 
-&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.10 --gamma-model 0.1 --output neuralbandit3_improvingexploration_metrics3_.csv
+&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.05 --gamma-model 0.1 --output neuralbandit3_improvingexploration_metrics_05.csv
+
+&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.10 --gamma-model 0.1 --output neuralbandit3_improvingexploration_metrics_10.csv
+
+
+&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.005 --gamma-model 0.01 --output neuralbandit3_improvingexplorationmodel_metrics_01.csv
+
+&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.005 --gamma-model 0.05 --output neuralbandit3_improvingexplorationmodel_metrics_05.csv
+
+&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.005 --gamma-model 0.10 --output neuralbandit3_improvingexplorationmodel_metrics_10.csv
+
+&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.005 --gamma-model 0.20 --output neuralbandit3_improvingexplorationmodel_metrics_20.csv
+
+&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.005 --gamma-model 0.30 --output neuralbandit3_improvingexplorationmodel_metrics_30.csv
+
+
+
+Final Tests (Tanh vs Leaky Relu with all of the other settings the same)
+
+&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation tanh --gamma 0.005 --gamma-model 0.30 --output neuralbandit3_improving_metrics_tanh.csv
+
+&#x09;python neuralbandit3_improvingactivation.py --steps 50000 --drift-every 5000 --log-every 500 --activation leaky_relu --gamma 0.005 --gamma-model 0.30 --output neuralbandit3_improving_metrics_leaky_relu.csv
