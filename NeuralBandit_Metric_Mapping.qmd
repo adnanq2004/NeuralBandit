@@ -1,5 +1,5 @@
 ---
-title: "NeuralBandit_Metric_Mapping"
+title: "NeuralBandit Metric Mapping"
 format: pdf
 execute:
   echo: false
@@ -10,578 +10,326 @@ execute:
 ---
 
 ```{r}
-library(dplyr)
+#| label: setup
 library(tidyverse)
-library(ggplot2)
+library(knitr)
+
+# ---- settings: change these if your experiment changes ----------------------
+RESULTS_DIR <- "results"   # folder written by run_experiments.py
+DRIFT_EVERY <- 5000        # steps between concept drifts
+N_UP        <- 3           # consecutive rises of the rolling reward that count as "recovery"
+CHANCE      <- 1 / 7       # expected reward of uniformly random actions (7 actions)
+
+# Display names and plotting order for each condition (file names are <condition>_seed<seed>.csv)
+condition_labels <- c(
+  sigmoid_default = "Sigmoid (default)",
+  relu            = "ReLU",
+  tanh            = "Tanh",
+  leaky_relu      = "Leaky ReLU",
+  `gamma_0.01`    = "gamma = 0.01",
+  `gamma_0.05`    = "gamma = 0.05",
+  `gamma_0.10`    = "gamma = 0.10",
+  `gm_0.01`       = "gamma_model = 0.01",
+  `gm_0.05`       = "gamma_model = 0.05",
+  `gm_0.20`       = "gamma_model = 0.20",
+  `gm_0.30`       = "gamma_model = 0.30",
+  `tanh_gm_0.30`  = "Tanh + gamma_model = 0.30",
+  `leaky_gm_0.30` = "Leaky ReLU + gamma_model = 0.30"
+)
+
+# Which conditions go in which figure. The default run is gamma = 0.005 AND gamma_model = 0.10.
+groups <- list(
+  "Activation functions"      = c("sigmoid_default", "relu", "tanh", "leaky_relu"),
+  "Per-step exploration (gamma; default = 0.005)" =
+    c("sigmoid_default", "gamma_0.01", "gamma_0.05", "gamma_0.10"),
+  "Configuration exploration (gamma_model; default = 0.10)" =
+    c("gm_0.01", "gm_0.05", "sigmoid_default", "gm_0.20", "gm_0.30"),
+  "Combined settings"         =
+    c("tanh", "tanh_gm_0.30", "leaky_relu", "leaky_gm_0.30")
+)
 ```
 
 ```{r}
+#| label: functions
 
-activation_names <- c("sigmoid", "sigmoid_more")
-
-for (activation in activation_names) {
-  
-  # Read the corresponding CSV
-  path <- paste0(
-    "neuralbandit3_original_metrics_",
-    activation,
-    ".csv"
-  )
-  
-  metrics <- read_csv(path, show_col_types = FALSE)
-  
-  # Calculate recovery signals
-  metrics <- metrics %>%
+read_run <- function(file) {
+  read_csv(file, show_col_types = FALSE) %>%
     arrange(step) %>%
-    mutate(
-      drift_event = as.logical(drift_event),
-      reward_change = rolling_reward - lag(rolling_reward),
-      increasing = reward_change > 0,
-      recovery_signal = increasing &
-        lag(increasing, 1, default = FALSE) &
-        lag(increasing, 2, default = FALSE)
-    )
-  
-  # Identify concept drift points
-  drift_points <- metrics %>%
-    filter(drift_event == TRUE) %>%
-    pull(step) %>%
-    sort()
-  
-  # Initialize recovery results
-  recovery_points <- data.frame()
-  
-  # Identify recovery after each drift
-  for (j in seq_along(drift_points)) {
-    d <- drift_points[j]
-    # Stop searching at the next drift
-    if (j < length(drift_points)) {
-      next_drift <- drift_points[j + 1]
-    } else {
-      next_drift <- Inf
-    }
-    
-    recovery <- metrics %>%
-      filter(
-        step > d,
-        step < next_drift,
-        drift_event == FALSE,
-        recovery_signal == TRUE
-      ) %>%
-      slice(1)
-    
-    if (nrow(recovery) > 0) {
-      recovery_points <- bind_rows(
-        recovery_points,
-        data.frame(
-          drift_step = d,
-          recovery_step = recovery$step,
-          rolling_reward = recovery$rolling_reward
-        )
-      )
-    }
+    mutate(drift_event = as.logical(drift_event))
+}
+
+# TRUE where the last `n` logged values of x were each higher than the one before.
+run_of_rises <- function(x, n) {
+  up  <- c(FALSE, diff(x) > 0)
+  out <- up
+  if (n > 1) for (k in 1:(n - 1)) out <- out & dplyr::lag(up, k, default = FALSE)
+  out
+}
+
+# Detect recovery after every drift in one run.
+#
+# Rule: a drift is "recovered" at the first logged step after
+# it, and before the next drift, where the rolling reward has risen N_UP times in a row.
+#
+# post_drift_only = TRUE  (default): all N_UP rises must happen AFTER the drift.
+#   The earliest possible detection is then drift + N_UP * 500 steps.
+# A drift that lands on the very last step cannot be recovered from, so it is dropped.
+detect_recoveries <- function(metrics, n_up = N_UP, post_drift_only = TRUE) {
+  last_step    <- max(metrics$step)
+  drift_points <- metrics %>% filter(drift_event) %>% pull(step) %>% sort()
+  drift_points <- drift_points[drift_points < last_step]
+  next_drifts  <- c(drift_points[-1], Inf)
+
+  if (!post_drift_only) {
+    metrics <- metrics %>% mutate(signal = run_of_rises(rolling_reward, n_up))
   }
-  
-  # Calculate recovery time
-  recovery_points <- recovery_points %>%
-    mutate(
-      recovery_time = recovery_step - drift_step
+
+  map2_dfr(drift_points, next_drifts, function(d, nb) {
+    pre_drift_reward <- metrics$rolling_reward[metrics$step == d][1]
+
+    if (post_drift_only) {
+      # segment starts at the drift row, which serves as the baseline for the first rise
+      seg <- metrics %>% filter(step >= d, step < nb)
+      seg$signal <- run_of_rises(seg$rolling_reward, n_up)
+      cand <- seg %>% filter(step > d, signal)
+    } else {
+      cand <- metrics %>% filter(step > d, step < nb, signal)
+    }
+
+    found <- nrow(cand) > 0
+    tibble(
+      drift_step       = d,
+      recovered        = found,
+      recovery_step    = if (found) cand$step[1] else NA_real_,
+      rolling_reward   = if (found) cand$rolling_reward[1] else NA_real_,
+      pre_drift_reward = pre_drift_reward
     )
-  
-  print(paste("Activation:", activation))
-  print(recovery_points)
-  
-  # Create graph
-  gg_graph <- ggplot(metrics, aes(x = step, y = rolling_reward)) +
-    geom_line(linewidth = 1) +
-    # Concept drift
-    geom_vline(
-      xintercept = drift_points,
-      linetype = "dashed",
-      color = "red",
-      linewidth = 0.8
-    ) +
-    # Recovery begins
-    geom_vline(
-      xintercept = recovery_points$recovery_step,
-      linetype = "dotted",
-      color = "blue",
-      linewidth = 0.8
-    ) +
-    
-    labs(
-      title = paste0(
-        "NeuralBandit3: Rolling Reward - ",
-        activation
-      ),
-      subtitle = "Red = concept drift | Blue = detected recovery",
-      x = "Training Steps",
-      y = "Rolling Reward"
-    ) +
-    
-    scale_y_continuous(
-      limits = c(0, 1),
-      labels = scales::percent
-    ) +
+  }) %>%
+    mutate(
+      recovery_time = recovery_step - drift_step,
+      above_chance  = rolling_reward > CHANCE   # NA when not recovered
+    )
+}
+
+# Plot one run with drift (red) and recovery (blue) markers.
+plot_run <- function(metrics, rec, title) {
+  ggplot(metrics, aes(x = step, y = rolling_reward)) +
+    geom_line(linewidth = 0.8) +
+    geom_hline(yintercept = CHANCE, linetype = "dotted", color = "grey40") +
+    geom_vline(xintercept = metrics$step[metrics$drift_event],
+               linetype = "dashed", color = "red", linewidth = 0.6) +
+    geom_vline(xintercept = rec$recovery_step[rec$recovered],
+               linetype = "dotted", color = "blue", linewidth = 0.6) +
+    labs(title = title,
+         subtitle = "Red = concept drift | Blue = detected recovery | Grey = random-action level (1/7)",
+         x = "Training steps", y = "Rolling reward") +
+    scale_y_continuous(limits = c(0, 1), labels = scales::percent) +
     theme_minimal()
-  
-  print(gg_graph)
+}
+
+# 95% confidence half-width across seeds (t distribution)
+ci95 <- function(x) {
+  x <- x[!is.na(x)]
+  n <- length(x)
+  if (n < 2) return(NA_real_)
+  qt(0.975, n - 1) * sd(x) / sqrt(n)
 }
 ```
 
 ```{r}
+#| label: load
 
-activation_names <- c("relu", "relu_more", "tanh", "tanh_more", "leaky_relu", "leaky_relu_more")
-
-for (activation in activation_names) {
-  
-  # Read the corresponding CSV
-  path <- paste0(
-    "neuralbandit3_improvingactivation_metrics_",
-    activation,
-    ".csv"
+run_index <- tibble(file = list.files(RESULTS_DIR, pattern = "_seed[0-9]+\\.csv$", full.names = TRUE)) %>%
+  mutate(
+    condition = sub("_seed[0-9]+\\.csv$", "", basename(file)),
+    seed      = as.integer(sub(".*_seed([0-9]+)\\.csv$", "\\1", basename(file)))
   )
-  
-  metrics <- read_csv(path, show_col_types = FALSE)
-  
-  # Calculate recovery signals
-  metrics <- metrics %>%
-    arrange(step) %>%
-    mutate(
-      drift_event = as.logical(drift_event),
-      reward_change = rolling_reward - lag(rolling_reward),
-      increasing = reward_change > 0,
-      recovery_signal = increasing &
-        lag(increasing, 1, default = FALSE) &
-        lag(increasing, 2, default = FALSE)
-    )
-  
-  # Identify concept drift points
-  drift_points <- metrics %>%
-    filter(drift_event == TRUE) %>%
-    pull(step) %>%
-    sort()
-  
-  # Initialize recovery results
-  recovery_points <- data.frame()
-  
-  # Identify recovery after each drift
-  for (j in seq_along(drift_points)) {
-    d <- drift_points[j]
-    # Stop searching at the next drift
-    if (j < length(drift_points)) {
-      next_drift <- drift_points[j + 1]
-    } else {
-      next_drift <- Inf
-    }
-    
-    recovery <- metrics %>%
-      filter(
-        step > d,
-        step < next_drift,
-        drift_event == FALSE,
-        recovery_signal == TRUE
-      ) %>%
-      slice(1)
-    
-    if (nrow(recovery) > 0) {
-      recovery_points <- bind_rows(
-        recovery_points,
-        data.frame(
-          drift_step = d,
-          recovery_step = recovery$step,
-          rolling_reward = recovery$rolling_reward
-        )
-      )
-    }
-  }
-  
-  # Calculate recovery time
-  recovery_points <- recovery_points %>%
-    mutate(
-      recovery_time = recovery_step - drift_step
-    )
-  
-  print(paste("Activation:", activation))
-  print(recovery_points)
-  
-  # Create graph
-  gg_graph <- ggplot(metrics, aes(x = step, y = rolling_reward)) +
-    geom_line(linewidth = 1) +
-    # Concept drift
-    geom_vline(
-      xintercept = drift_points,
-      linetype = "dashed",
-      color = "red",
-      linewidth = 0.8
-    ) +
-    # Recovery begins
-    geom_vline(
-      xintercept = recovery_points$recovery_step,
-      linetype = "dotted",
-      color = "blue",
-      linewidth = 0.8
-    ) +
 
-    labs(
-      title = paste0(
-        "NeuralBandit3: Rolling Reward - ",
-        activation
-      ),
-      subtitle = "Red = concept drift | Blue = detected recovery",
-      x = "Training Steps",
-      y = "Rolling Reward"
-    ) +
-    
-    scale_y_continuous(
-      limits = c(0, 1),
-      labels = scales::percent
-    ) +
-    theme_minimal()
-  
-  print(gg_graph)
-}
+if (nrow(run_index) == 0) stop("No result files found in '", RESULTS_DIR, "'. Run run_experiments.py first.")
+
+unknown <- setdiff(unique(run_index$condition), names(condition_labels))
+if (length(unknown) > 0) stop("Add these conditions to condition_labels: ", paste(unknown, collapse = ", "))
+
+runs <- run_index %>% mutate(metrics = map(file, read_run))
+
+cond_label <- function(x) factor(unname(condition_labels[x]), levels = unname(condition_labels))
+
+# Sanity check: every condition should have the same seeds and the same run length.
+run_index %>%
+  mutate(steps = map_dbl(runs$metrics, ~ max(.x$step))) %>%
+  group_by(condition) %>%
+  summarise(seeds = n(), min_steps = min(steps), max_steps = max(steps), .groups = "drop") %>%
+  mutate(condition = condition_labels[condition]) %>%
+  kable(caption = "Runs found per condition (check: same number of seeds and steps everywhere).")
 ```
 
 ```{r}
+#| label: recoveries
 
-expl_algorithms_names <- c("005", "01", "05", "10")
+recoveries <- runs %>%
+  mutate(rec = map(metrics, detect_recoveries)) %>%
+  select(condition, seed, rec) %>%
+  unnest(rec)
 
-for (expl_algorithms in expl_algorithms_names) {
-  
-  # Read the corresponding CSV
-  path <- paste0(
-    "neuralbandit3_improvingexploration_metrics_",
-    expl_algorithms,
-    ".csv"
-  )
-  
-  metrics <- read_csv(path, show_col_types = FALSE)
-  
-  # Calculate recovery signals
-  metrics <- metrics %>%
-    arrange(step) %>%
-    mutate(
-      drift_event = as.logical(drift_event),
-      reward_change = rolling_reward - lag(rolling_reward),
-      increasing = reward_change > 0,
-      recovery_signal = increasing &
-        lag(increasing, 1, default = FALSE) &
-        lag(increasing, 2, default = FALSE)
-    )
-  
-  # Identify concept drift points
-  drift_points <- metrics %>%
-    filter(drift_event == TRUE) %>%
-    pull(step) %>%
-    sort()
-  
-  # Initialize recovery results
-  recovery_points <- data.frame()
-  
-  # Identify recovery after each drift
-  for (j in seq_along(drift_points)) {
-    d <- drift_points[j]
-    # Stop searching at the next drift
-    if (j < length(drift_points)) {
-      next_drift <- drift_points[j + 1]
-    } else {
-      next_drift <- Inf
-    }
-    
-    recovery <- metrics %>%
-      filter(
-        step > d,
-        step < next_drift,
-        drift_event == FALSE,
-        recovery_signal == TRUE
+per_run <- recoveries %>%
+  group_by(condition, seed) %>%
+  summarise(
+    drifts                  = n(),
+    recovered               = sum(recovered),
+    recovery_rate           = recovered / drifts,
+    mean_recovery_time      = mean(recovery_time, na.rm = TRUE),
+    mean_reward_at_recovery = mean(rolling_reward, na.rm = TRUE),
+    recoveries_below_chance = sum(!above_chance, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    runs %>%
+      mutate(
+        mean_rolling_reward   = map_dbl(metrics, ~ mean(.x$rolling_reward)),
+        final_cumulative_regret = map_dbl(metrics, ~ dplyr::last(.x$cumulative_regret))
       ) %>%
-      slice(1)
-    
-    if (nrow(recovery) > 0) {
-      recovery_points <- bind_rows(
-        recovery_points,
-        data.frame(
-          drift_step = d,
-          recovery_step = recovery$step,
-          rolling_reward = recovery$rolling_reward
-        )
-      )
-    }
-  }
-  
-  # Calculate recovery time
-  recovery_points <- recovery_points %>%
-    mutate(
-      recovery_time = recovery_step - drift_step
-    )
-  
-  print(paste("Exploration Algorithm:", expl_algorithms))
-  print(recovery_points)
-  
-  # Create graph
-  gg_graph <- ggplot(metrics, aes(x = step, y = rolling_reward)) +
-    geom_line(linewidth = 1) +
-    # Concept drift
+      select(condition, seed, mean_rolling_reward, final_cumulative_regret),
+    by = c("condition", "seed")
+  )
+
+by_condition <- per_run %>%
+  group_by(condition) %>%
+  summarise(
+    n_seeds = n(),
+    across(
+      c(recovery_rate, mean_recovery_time, mean_reward_at_recovery,
+        mean_rolling_reward, final_cumulative_regret),
+      list(mean = ~ mean(.x, na.rm = TRUE), ci95 = ci95),
+      .names = "{.col}__{.fn}"
+    ),
+    .groups = "drop"
+  ) %>%
+  mutate(condition = cond_label(condition)) %>%
+  arrange(condition)
+
+write_csv(recoveries, "recoveries_all_runs.csv")
+write_csv(per_run, "summary_per_run.csv")
+write_csv(by_condition, "summary_by_condition.csv")
+```
+
+# Summary across seeds
+
+Mean and 95% confidence half-width (t distribution) over seeds. Recovery rate is the fraction of
+drifts with a detected recovery; a drift on the final step is excluded.
+
+```{r}
+#| label: summary-table
+by_condition %>%
+  transmute(
+    Condition = condition,
+    Seeds = n_seeds,
+    `Recovery rate` = sprintf("%.2f ± %.2f", recovery_rate__mean, recovery_rate__ci95),
+    `Mean recovery time` = sprintf("%.0f ± %.0f", mean_recovery_time__mean, mean_recovery_time__ci95),
+    `Reward at recovery` = sprintf("%.3f ± %.3f", mean_reward_at_recovery__mean, mean_reward_at_recovery__ci95),
+    `Mean rolling reward` = sprintf("%.3f ± %.3f", mean_rolling_reward__mean, mean_rolling_reward__ci95),
+    `Final cum. regret` = sprintf("%.0f ± %.0f", final_cumulative_regret__mean, final_cumulative_regret__ci95)
+  ) %>%
+  kable()
+```
+
+# Rolling reward by experiment
+
+Lines are the mean over seeds; bands are one standard deviation. Dashed red lines are drifts and
+the dotted grey line is the random-action level (1/7).
+
+```{r}
+#| label: curves
+for (g in names(groups)) {
+  p <- curve_summary %>%
+    filter(condition %in% groups[[g]]) %>%
+    ggplot(aes(x = step, y = mean, color = label, fill = label)) +
+    geom_ribbon(
+      aes(
+        ymin = pmax(mean - sd, 0),
+        ymax = pmin(mean + sd, 1)
+      ),
+      alpha = 0.07,
+      color = NA
+    ) +
+    geom_line(linewidth = 1.1) +
     geom_vline(
-      xintercept = drift_points,
+      xintercept = drift_steps,
       linetype = "dashed",
       color = "red",
-      linewidth = 0.8
+      linewidth = 0.5,
+      alpha = 0.5
     ) +
-    # Recovery begins
-    geom_vline(
-      xintercept = recovery_points$recovery_step,
+    geom_hline(
+      yintercept = CHANCE,
       linetype = "dotted",
-      color = "blue",
-      linewidth = 0.8
+      color = "grey40"
     ) +
-    
-    labs(
-      title = paste0(
-        "NeuralBandit3: Rolling Reward - Gamma = .",
-        expl_algorithms
-      ),
-      subtitle = "Red = concept drift | Blue = detected recovery",
-      x = "Training Steps",
-      y = "Rolling Reward"
+    scale_color_viridis_d(option = "D", end = 0.85) +
+    scale_fill_viridis_d(option = "D", end = 0.85) +
+    scale_x_continuous(
+      breaks = seq(0, max_step, by = DRIFT_EVERY),
+      labels = scales::label_number(
+        scale = 1 / 1000,
+        suffix = "k"
+      )
     ) +
-    
     scale_y_continuous(
-      limits = c(0, 1),
+      breaks = seq(0, 1, by = 0.2),
       labels = scales::percent
     ) +
-    theme_minimal()
-  
-  print(gg_graph)
+    coord_cartesian(ylim = c(0, 1)) +
+    labs(
+      title = paste("Rolling reward:", g),
+      subtitle = "Shaded regions = ±1 SD across seeds | Red dashed lines = concept drift",
+      x = "Training steps",
+      y = "Mean rolling reward",
+      color = NULL,
+      fill = NULL
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "bottom",
+      legend.text = element_text(size = 9),
+      legend.key.width = unit(1.5, "cm"),
+      panel.grid.minor = element_blank(),
+      plot.title = element_text(face = "bold")
+    ) +
+    guides(fill = "none")
+  print(p)
 }
 ```
 
+# Recovery map
+
+Share of seeds in which each drift was recovered (1 = every seed).
+
 ```{r}
-
-expl_method_names <- c("01", "05", "10", "20", "30")
-
-for (expl_method in expl_method_names) {
-  
-  # Read the corresponding CSV
-  path <- paste0(
-    "neuralbandit3_improvingexplorationmodel_metrics_",
-    expl_method,
-    ".csv"
-  )
-  
-  metrics <- read_csv(path, show_col_types = FALSE)
-  
-  # Calculate recovery signals
-  metrics <- metrics %>%
-    arrange(step) %>%
-    mutate(
-      drift_event = as.logical(drift_event),
-      reward_change = rolling_reward - lag(rolling_reward),
-      increasing = reward_change > 0,
-      recovery_signal = increasing &
-        lag(increasing, 1, default = FALSE) &
-        lag(increasing, 2, default = FALSE)
-    )
-  
-  # Identify concept drift points
-  drift_points <- metrics %>%
-    filter(drift_event == TRUE) %>%
-    pull(step) %>%
-    sort()
-  
-  # Initialize recovery results
-  recovery_points <- data.frame()
-  
-  # Identify recovery after each drift
-  for (j in seq_along(drift_points)) {
-    d <- drift_points[j]
-    # Stop searching at the next drift
-    if (j < length(drift_points)) {
-      next_drift <- drift_points[j + 1]
-    } else {
-      next_drift <- Inf
-    }
-    
-    recovery <- metrics %>%
-      filter(
-        step > d,
-        step < next_drift,
-        drift_event == FALSE,
-        recovery_signal == TRUE
-      ) %>%
-      slice(1)
-    
-    if (nrow(recovery) > 0) {
-      recovery_points <- bind_rows(
-        recovery_points,
-        data.frame(
-          drift_step = d,
-          recovery_step = recovery$step,
-          rolling_reward = recovery$rolling_reward
-        )
-      )
-    }
-  }
-  
-  # Calculate recovery time
-  recovery_points <- recovery_points %>%
-    mutate(
-      recovery_time = recovery_step - drift_step
-    )
-  
-  print(paste("Exploration Algorithm:", expl_method))
-  print(recovery_points)
-  
-  # Create graph
-  gg_graph <- ggplot(metrics, aes(x = step, y = rolling_reward)) +
-    geom_line(linewidth = 1) +
-    # Concept drift
-    geom_vline(
-      xintercept = drift_points,
-      linetype = "dashed",
-      color = "red",
-      linewidth = 0.8
-    ) +
-    # Recovery begins
-    geom_vline(
-      xintercept = recovery_points$recovery_step,
-      linetype = "dotted",
-      color = "blue",
-      linewidth = 0.8
-    ) +
-    
-    labs(
-      title = paste0(
-        "NeuralBandit3: Rolling Reward - Gamma_method = .",
-        expl_method
-      ),
-      subtitle = "Red = concept drift | Blue = detected recovery",
-      x = "Training Steps",
-      y = "Rolling Reward"
-    ) +
-    
-    scale_y_continuous(
-      limits = c(0, 1),
-      labels = scales::percent
-    ) +
-    theme_minimal()
-  
-  print(gg_graph)
-}
+#| label: recovery-map
+#| fig-height: 5.5
+recoveries %>%
+  group_by(condition, drift_step) %>%
+  summarise(frac = mean(recovered), .groups = "drop") %>%
+  mutate(label = forcats::fct_rev(cond_label(condition))) %>%
+  ggplot(aes(x = factor(drift_step / 1000), y = label, fill = frac)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(limits = c(0, 1), labels = scales::percent) +
+  labs(x = "Drift (thousand steps)", y = NULL, fill = "Seeds recovered",
+       title = "Recovery by drift and condition") +
+  theme_minimal()
 ```
 
+# Appendix: individual runs (first seed of each condition)
+
 ```{r}
-
-
-activation_names <- c("tanh", "leaky_relu")
-
-for (activation in activation_names) {
-  
-  # Read the corresponding CSV
-  path <- paste0(
-    "neuralbandit3_improvingactivation_metrics_",
-    activation,
-    ".csv"
-  )
-  
-  metrics <- read_csv(path, show_col_types = FALSE)
-  
-  # Calculate recovery signals
-  metrics <- metrics %>%
-    arrange(step) %>%
-    mutate(
-      drift_event = as.logical(drift_event),
-      reward_change = rolling_reward - lag(rolling_reward),
-      increasing = reward_change > 0,
-      recovery_signal = increasing &
-        lag(increasing, 1, default = FALSE) &
-        lag(increasing, 2, default = FALSE)
-    )
-  
-  # Identify concept drift points
-  drift_points <- metrics %>%
-    filter(drift_event == TRUE) %>%
-    pull(step) %>%
-    sort()
-  
-  # Initialize recovery results
-  recovery_points <- data.frame()
-  
-  # Identify recovery after each drift
-  for (j in seq_along(drift_points)) {
-    d <- drift_points[j]
-    # Stop searching at the next drift
-    if (j < length(drift_points)) {
-      next_drift <- drift_points[j + 1]
-    } else {
-      next_drift <- Inf
-    }
-    
-    recovery <- metrics %>%
-      filter(
-        step > d,
-        step < next_drift,
-        drift_event == FALSE,
-        recovery_signal == TRUE
-      ) %>%
-      slice(1)
-    
-    if (nrow(recovery) > 0) {
-      recovery_points <- bind_rows(
-        recovery_points,
-        data.frame(
-          drift_step = d,
-          recovery_step = recovery$step,
-          rolling_reward = recovery$rolling_reward
-        )
-      )
-    }
-  }
-  
-  # Calculate recovery time
-  recovery_points <- recovery_points %>%
-    mutate(
-      recovery_time = recovery_step - drift_step
-    )
-  
-  print(paste("Activation:", activation))
-  print(recovery_points)
-  
-  # Create graph
-  gg_graph <- ggplot(metrics, aes(x = step, y = rolling_reward)) +
-    geom_line(linewidth = 1) +
-    # Concept drift
-    geom_vline(
-      xintercept = drift_points,
-      linetype = "dashed",
-      color = "red",
-      linewidth = 0.8
-    ) +
-    # Recovery begins
-    geom_vline(
-      xintercept = recovery_points$recovery_step,
-      linetype = "dotted",
-      color = "blue",
-      linewidth = 0.8
-    ) +
-    
-    labs(
-      title = paste0(
-        "NeuralBandit3: Rolling Reward - ",
-        activation
-      ),
-      subtitle = "Red = concept drift | Blue = detected recovery",
-      x = "Training Steps",
-      y = "Rolling Reward"
-    ) +
-    
-    scale_y_continuous(
-      limits = c(0, 1),
-      labels = scales::percent
-    ) +
-    theme_minimal()
-  
-  print(gg_graph)
+#| label: single-runs
+#| fig-height: 4
+first_seed <- min(runs$seed)
+for (cond in names(condition_labels)) {
+  i <- which(runs$condition == cond & runs$seed == first_seed)
+  if (length(i) == 0) next
+  rec <- detect_recoveries(runs$metrics[[i]])
+  print(plot_run(runs$metrics[[i]], rec,
+                 paste0(condition_labels[[cond]], " (seed ", first_seed, ")")))
+  print(kable(rec %>% select(drift_step, recovered, recovery_step, recovery_time, rolling_reward)))
 }
 ```
