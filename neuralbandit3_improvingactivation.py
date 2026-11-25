@@ -1,4 +1,22 @@
 from neuralbandit3_original import *
+from datasets import load_dataset, DATASETS
+
+
+def drifted_label(label, step, drift_every, num_actions):
+    # Cyclic class rotation for any number of actions (the original hard-coded 7).
+    # Every drift_every steps all labels shift forward by one, wrapping after num_actions.
+    if drift_every <= 0:
+        return int(label)
+    shifts = step // drift_every
+    return int((label + shifts) % num_actions)
+
+
+def load_data(name, seed):
+    # covertype keeps the original loader so earlier results stay reproducible.
+    if name == "covertype":
+        X, y = load_forest_cover(seed)
+        return X, y, 7
+    return load_dataset(name, seed)
 
 def create_network(input_size, hidden_size, activation):
     # feed-forward neural network with one layer
@@ -77,10 +95,9 @@ def run(args):
     # then repeat the contextual-bandit decision/update cycle.
     set_seeds(args.seed)
 
-    print("Loading Forest Cover Type dataset...")
-    X, y = load_forest_cover(args.seed)
+    print(f"Loading dataset: {args.dataset}...")
+    X, y, K = load_data(args.dataset, args.seed)
     n_rows, n_features = X.shape
-    K = 7
     configs = get_model_configs(args.models)
     M = len(configs)
 
@@ -95,6 +112,10 @@ def run(args):
     # Set up K separate EXP3 selectors: one model selector for each action.
     exp3_weights = initialize_exp3(K, M)
     rng = np.random.default_rng(args.seed)
+    # Order in which rows are replayed. By default the same shuffled order repeats when the
+    # run is longer than the dataset; --reshuffle draws a new order for every pass.
+    rng_data = np.random.default_rng(args.seed + 1)
+    order = np.arange(n_rows)
 
     cumulative_reward = 0.0
     cumulative_mistakes = 0.0
@@ -130,14 +151,18 @@ def run(args):
             
             # Convert zero-based step into human-readable iteration
             iteration = step + 1
-            i = step % n_rows
+            epoch, pos = divmod(step, n_rows)
+            if args.reshuffle and pos == 0 and epoch > 0:
+                order = rng_data.permutation(n_rows)
+            i = order[pos]
             context = X[i]
             
             # Apply concept drift
             true_action = drifted_label(
                 y[i],
                 iteration,
-                args.drift_every
+                args.drift_every,
+                K
             )
 
             # Track concept drift information
@@ -288,6 +313,14 @@ def parse_args():
         choices=["sigmoid", "relu", "tanh", "leaky_relu"],
         default="sigmoid"
     )
+    parser.add_argument(
+        "--dataset",
+        choices=["covertype"] + list(DATASETS),
+        default="covertype"
+    )
+    # Reshuffle the rows on every pass through the data (useful when --steps exceeds the
+    # number of rows, e.g. letter has 20,000 rows).
+    parser.add_argument("--reshuffle", action="store_true")
     args = parser.parse_args()
 
     if args.steps <= 0 or args.log_every <= 0 or args.rolling_window <= 0:
